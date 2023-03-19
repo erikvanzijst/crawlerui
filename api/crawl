@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+# Simple multiprocessing web crawler, following all a.href's that end in a '/'.
+import argparse
+import os
+import traceback
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import Barrier
+from urllib.parse import urljoin
+from time import time
+
+from bs4 import BeautifulSoup
+import requests
+
+root: str = 'http://be.archive.ubuntu.com/'
+CONCURRENCY = 48
+session = requests.Session()
+
+
+def crawl(url: str, base: str) -> set[str]:
+    while True:
+        print(f'{os.getpid()} processing {url}')
+        try:
+            html = session.get(url).content
+            soup = BeautifulSoup(html, 'html.parser')
+            urls = {urljoin(url, a.get('href')) for a in soup.find_all('a')}
+            return set(filter(lambda u: u.startswith(base) and u.endswith('/'), urls))
+        except IOError:
+            traceback.print_exc()
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Web crawler')
+    parser.add_argument('-u', '--url', type=str, default=root, help='root url to start at')
+    parser.add_argument('-w', '--workers', type=int, default=CONCURRENCY, help='number of workers')
+    cfg = parser.parse_args()
+
+    seen: set[str] = {'http://be.archive.ubuntu.com/ubuntu/ubuntu/'}
+    barrier = Barrier(2)
+    inflight = 1
+
+    start = time()
+    with ProcessPoolExecutor(cfg.workers) as executor:
+        def submit(url: str) -> None:
+            def cb(urls):
+                global inflight
+                for u in urls - seen:
+                    inflight += 1
+                    submit(u)
+                inflight -= 1
+                if not inflight:
+                    barrier.wait()
+
+            seen.add(url)
+            executor.submit(crawl, url, cfg.url).add_done_callback(lambda future: cb(future.result()))
+
+        submit(cfg.url)
+        barrier.wait()
+
+    print(f'{len(seen)} urls crawled in {time() - start:.2f} seconds ({len(seen) / (time() - start):.2f} urls/second with {CONCURRENCY} threads)')

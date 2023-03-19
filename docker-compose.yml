@@ -1,0 +1,31 @@
+version: '3.7'
+
+services:
+  db:
+    image: postgres:14.7
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=crawler
+
+  api:
+    build:
+      context: api
+      dockerfile: Dockerfile
+
+    ports:
+      - 8000:8000
+    volumes:
+      - ./api:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  ui:
+    build:
+      context: ui
+      dockerfile: Dockerfile
+    ports:
+      - 3000:3000
+    entrypoint: npm start
+    environment:
+      - API_URL=http://localhost:8000
